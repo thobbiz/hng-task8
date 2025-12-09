@@ -1,11 +1,14 @@
 package auth
 
 import (
+	"fmt"
 	"hng-stage8/definitions"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // GoogleLoginHandler initiates the Google OAuth process
@@ -102,4 +105,52 @@ func GoogleCallbackHandler(ctx *gin.Context) {
 		"user":  user,
 		"token": tokenString,
 	})
+}
+
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing"})
+			return
+		}
+
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Method)
+			}
+			return definitions.JwtSecretKey, nil
+		})
+
+		if err != nil {
+			// This catches expired tokens, bad signatures, etc.
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token", "details": err.Error()})
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token structure or status"})
+			return
+		}
+
+		email, ok := claims["email"].(string)
+		if !ok || email == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid 'email' claim"})
+			return
+		}
+		c.Set("user_email", email)
+
+		userID, ok := claims["user_id"].(string)
+		fmt.Println(userID)
+		if !ok || userID == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid 'user_id' claim"})
+			return
+		}
+		c.Set("user_id", userID)
+
+		c.Next()
+	}
 }

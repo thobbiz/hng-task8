@@ -14,6 +14,7 @@ type ExpiryDate string
 
 const (
 	PaystackBaseURL = "https://api.paystack.co"
+	MaxKeysPerUser  = 5
 
 	PermissionDeposit  Permission = "deposit"
 	PermissionTransfer Permission = "transfer"
@@ -63,6 +64,11 @@ type ApiKey struct {
 	Name        string   `json:"name"`
 	Permissions []string `json:"permissions"`
 	Expiry      string   `json:"expiry"`
+}
+
+type ApiKeyResponse struct {
+	ApiKey string `json:"api_key"`
+	Expiry string `json:"expires_at"`
 }
 
 type GoogleUserInfo struct {
