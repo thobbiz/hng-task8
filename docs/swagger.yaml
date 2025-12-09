@@ -1,0 +1,85 @@
+basePath: /
+definitions:
+  definitions.User:
+    properties:
+      email:
+        type: string
+      name:
+        type: string
+      user_id:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: A sample API for handling Paystack payments in Go. It also provides
+    Google authentication. Users can authenticate with Google and use the API to initiate
+    payments.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Google auth $ Paystack Payment API
+  version: "1.0"
+paths:
+  /auth/google/callback:
+    get:
+      description: |-
+        Exchanges the code for a token, fetches user info, and logs them in.
+        Exchanges the code for a token, fetches user info, and logs them in.
+      parameters:
+      - description: OAuth state parameter
+        in: query
+        name: state
+        required: true
+        type: string
+      - description: OAuth authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      - description: OAuth state parameter
+        in: query
+        name: state
+        required: true
+        type: string
+      - description: OAuth authorization code
+        in: query
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Missing code
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Invalid state or code exchange failed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Database or Provider error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Google Auth Callback
+      tags:
+      - auth
+      - auth
+swagger: "2.0"
