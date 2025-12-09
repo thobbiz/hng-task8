@@ -78,7 +78,7 @@ func GoogleCallbackHandler(ctx *gin.Context) {
 	}
 
 	// Fetch user info
-	googleUser, err := fetchUserInfo(ctx.Request.Context(), oauthToken)
+	googleUser, err := FetchUserInfo(ctx.Request.Context(), oauthToken)
 	if err != nil {
 		log.Printf("Failed to fetch user info: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Provider error fetching user info"})
@@ -86,7 +86,7 @@ func GoogleCallbackHandler(ctx *gin.Context) {
 	}
 
 	// Update or Create user in DB
-	user, err := updateOrCreateUser(ctx.Request.Context(), googleUser)
+	user, err := CreateUserAndWallet(ctx, googleUser)
 	if err != nil {
 		log.Printf("Failed to save user to db: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Internal DB error"})
@@ -94,7 +94,7 @@ func GoogleCallbackHandler(ctx *gin.Context) {
 	}
 
 	// Create JWT token
-	tokenString, err := CreateJWTtoken(user)
+	tokenString, err := CreateJWTtoken(*user)
 	if err != nil {
 		log.Printf("Failed to create JWT token: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate token"})
