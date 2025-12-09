@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hng-stage8/definitions"
+	"hng-stage8/util"
 	"log"
 	"strings"
 	"time"
@@ -17,7 +18,7 @@ func GenerateApiKey(ctx context.Context, apikey definitions.ApiKey, userID strin
 	// Start transaction
 	tx, err := definitions.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to start transaction: %w", err)
+		return "", "", fmt.Errorf("failed to start transaction: %w\n", err)
 	}
 
 	defer func() {
@@ -34,7 +35,7 @@ func GenerateApiKey(ctx context.Context, apikey definitions.ApiKey, userID strin
 	// Check how many api keys the user has
 	limitReached, err := checkKeyLimit(tx, ctx, userID)
 	if err != nil {
-		log.Printf("Failed to check API key count: %v", err)
+		log.Printf("Failed to check API key count: %v\n", err)
 		return "", "", err
 	}
 	if limitReached {
@@ -42,41 +43,101 @@ func GenerateApiKey(ctx context.Context, apikey definitions.ApiKey, userID strin
 	}
 
 	// Insert API key into db
-	apiKeyID, expiryTime, err := insertApiKey(tx, ctx, userID, apikey)
+	apiKeyID, expiryTime, err := insertApiKey(tx, ctx, userID, apikey.Name, apikey.ExpiryTimeFrame)
 	if err != nil {
-		log.Printf("Failed to generate API key: %v", err)
+		log.Printf("Failed to generate API key: %v\n", err)
 		return "", "", err
 	}
 
 	// Insert permissions after API key is created
 	if err := insertPermissions(tx, ctx, apiKeyID, apikey.Permissions); err != nil {
-		log.Printf("Failed to insert permissions: %v", err)
+		log.Printf("Failed to insert permissions: %v\n", err)
 		return "", "", err
 	}
 
 	// Commit transaction
 	if err = tx.Commit(); err != nil {
-		return "", "", fmt.Errorf("failed to commit transaction: %w", err)
+		return "", "", fmt.Errorf("failed to commit transaction: %w\n", err)
 	}
 
 	return apiKeyID, expiryTime, nil
 }
 
-func insertApiKey(tx *sql.Tx, ctx context.Context, userID string, apiKey definitions.ApiKey) (string, string, error) {
+func RolloverApiKey(ctx context.Context, rolloverReq definitions.RolloverApiReq, userID string) (string, string, error) {
+	// Start Transaction
+	tx, err := definitions.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to start transaction: %w", err)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r)
+		}
+		if err != nil {
+			log.Println("Rolling back tx...")
+			tx.Rollback()
+		}
+	}()
+
+	// Get api key name
+	apiKeyName, err := getApiKeyName(tx, ctx, userID, rolloverReq.ExpiredKeyID)
+	if err != nil {
+		log.Println(err)
+		return "", "", errors.New(err.Error())
+	}
+
+	// insert a new api key and delete the old api key
+	newApiKeyID, expiryTime, err := insertAndDeleteApiKey(tx, ctx, userID, apiKeyName, rolloverReq.ExpiredKeyID, rolloverReq.ExpiryTimeFrame)
+	if err != nil {
+		log.Printf("Failed to refresh API key: %v\n", err)
+		return "", "", fmt.Errorf("failed to refresh API key: %w", err)
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		return "", "", fmt.Errorf("failed to commit transaction: %w\n", err)
+	}
+
+	return newApiKeyID, expiryTime, nil
+}
+
+func insertAndDeleteApiKey(tx *sql.Tx, ctx context.Context, userID string, apiKeyName string, apiKeyID string, expiryTimeFrame string) (string, string, error) {
+	// Insert API key into db
+	newApiKeyID, expiryTime, err := insertApiKey(tx, ctx, userID, apiKeyName, expiryTimeFrame)
+	if err != nil {
+		log.Printf("Failed to insert new API key: %v\n", err)
+		return "", "", err
+	}
+
+	// Update ID for permissions to the new API key
+	if err := updatePermissionsForApiKey(tx, ctx, apiKeyID, newApiKeyID); err != nil {
+		return "", "", err
+	}
+
+	// Delete old api key
+	if err := deleteApiKey(tx, ctx, apiKeyID); err != nil {
+		return "", "", err
+	}
+
+	return newApiKeyID, expiryTime, nil
+}
+
+func insertApiKey(tx *sql.Tx, ctx context.Context, userID string, apiKeyName, expiryTimeFrame string) (string, string, error) {
 	// Get current time for created_at
 	currentTime := time.Now().UTC()
 	formattedCurrentTime := currentTime.Format(time.RFC3339)
 
 	// Get current time for expires_at
-	expiryDate := definitions.ExpiryDate(apiKey.Expiry)
-	formattedExpiryTime, ok := getExpiredTime(currentTime, expiryDate)
+	expiryDate := definitions.ExpiryDate(expiryTimeFrame)
+	formattedExpiryTime, ok := util.GetExpiredTime(currentTime, expiryDate)
 	if !ok {
 		return "", "", errors.New("invalid expiry date")
 	}
 
 	// Generate a unique uuid for the API key ID
 	uuid := strings.ReplaceAll(uuid.New().String(), "-", "")
-
 	finalID := "sk_live_" + uuid
 
 	query := `
@@ -85,7 +146,7 @@ func insertApiKey(tx *sql.Tx, ctx context.Context, userID string, apiKey definit
     `
 
 	// Insert the API key into the database
-	_, err := tx.ExecContext(ctx, query, finalID, userID, apiKey.Name, apiKey.Expiry, formattedCurrentTime, formattedExpiryTime)
+	_, err := tx.ExecContext(ctx, query, finalID, userID, apiKeyName, expiryTimeFrame, formattedCurrentTime, formattedExpiryTime)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to save api key to DB: %w", err)
 	}
@@ -104,7 +165,7 @@ func insertPermissions(tx *sql.Tx, ctx context.Context, apiKeyID string, perms [
 
 	for i, p := range perms {
 		// Get and validate permission ID
-		permID, valid := getPermissionID(definitions.Permission(p))
+		permID, valid := util.GetPermissionID(definitions.Permission(p))
 		if !valid {
 			return fmt.Errorf("invalid permission: %s", p)
 		}
@@ -149,50 +210,52 @@ func checkKeyLimit(tx *sql.Tx, ctx context.Context, userID string) (bool, error)
 	return currentCount >= definitions.MaxKeysPerUser, nil
 }
 
-func validatePermission(perm []string) error {
-	if len(perm) == 0 {
-		return errors.New("no permissions provided")
+func updatePermissionsForApiKey(tx *sql.Tx, ctx context.Context, oldApiKeyID string, newApiKeyID string) error {
+	query := `
+        UPDATE api_key_permissions
+        SET api_key_id =?
+        WHERE api_key_id = ?;
+    `
+
+	result, err := tx.ExecContext(ctx, query, newApiKeyID, oldApiKeyID)
+	if err != nil {
+		return fmt.Errorf("failed to update permissions for key %s: %w", oldApiKeyID, err)
 	}
 
-	if len(perm) > 3 {
-		return errors.New("too many permissions (max 3 allowed)")
-	}
-
-	for _, p := range perm {
-		perm := definitions.Permission(p)
-
-		if !definitions.ValidPermissions[perm] {
-			return fmt.Errorf("invalid permission: %s", p)
-		}
-	}
+	rowsAffected, _ := result.RowsAffected()
+	log.Printf("Updated %d api_key_id for API Key %s to %s\n", rowsAffected, oldApiKeyID, newApiKeyID)
 	return nil
 }
 
-func validateExpiry(expiry string) error {
-	exp := definitions.ExpiryDate(expiry)
+func deleteApiKey(tx *sql.Tx, ctx context.Context, apiKeyID string) error {
+	query := `
+		DELETE FROM api_keys
+        WHERE id = ?;
+    `
 
-	if !definitions.ValidExpiry[exp] {
-		return errors.New("invalid expiry")
+	result, err := tx.ExecContext(ctx, query, apiKeyID)
+	if err != nil {
+		return fmt.Errorf("failed to delete api key %s: %w", apiKeyID, err)
 	}
 
+	rowsAffected, _ := result.RowsAffected()
+	log.Printf("Deleted API Key %d to %s\n", rowsAffected, apiKeyID)
 	return nil
 }
 
-func getExpiredTime(currentTime time.Time, expiry definitions.ExpiryDate) (string, bool) {
-	duration, ok := definitions.ExpiryTime[expiry]
-	if !ok {
-		return "", false
+func getApiKeyName(tx *sql.Tx, ctx context.Context, userID string, apiKeyID string) (string, error) {
+	query := `
+		SELECT name
+		FROM api_keys
+		WHERE user_id = ? AND id = ?;
+	`
+
+	var expTime string
+
+	err := tx.QueryRowContext(ctx, query, userID, apiKeyID).Scan(&expTime)
+	if err != nil {
+		return "", fmt.Errorf("failed to check API key name for user %s: %w", userID, err)
 	}
 
-	expiryTime := currentTime.Add(duration)
-	return expiryTime.Format(time.RFC3339), true
-}
-
-func getPermissionID(perm definitions.Permission) (string, bool) {
-	permissionID, ok := definitions.PermissionKeys[perm]
-	if !ok {
-		return "", false
-	}
-
-	return permissionID, true
+	return expTime, nil
 }

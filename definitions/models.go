@@ -61,14 +61,19 @@ var (
 )
 
 type ApiKey struct {
-	Name        string   `json:"name"`
-	Permissions []string `json:"permissions"`
-	Expiry      string   `json:"expiry"`
+	Name            string   `json:"name"`
+	Permissions     []string `json:"permissions"`
+	ExpiryTimeFrame string   `json:"expiry"`
 }
 
 type ApiKeyResponse struct {
 	ApiKey string `json:"api_key"`
 	Expiry string `json:"expires_at"`
+}
+
+type RolloverApiReq struct {
+	ExpiredKeyID    string `json:"expired_key_id"`
+	ExpiryTimeFrame string `json:"expiry"`
 }
 
 type GoogleUserInfo struct {

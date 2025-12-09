@@ -88,6 +88,7 @@ func main() {
 	apiRoute.Use(auth.AuthMiddleware()) // <--- THIS LINE IS CRITICAL
 	{
 		apiRoute.POST("/create", apikey.CreateApiKeyHandler)
+		apiRoute.POST("/rollover", apikey.RollOverApiKeyHandler)
 	}
 
 	// protected := router.Group("/payments")
