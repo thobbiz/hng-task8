@@ -6,6 +6,7 @@ import (
 	apikey "hng-stage8/api-key"
 	"hng-stage8/auth"
 	"hng-stage8/definitions"
+	"hng-stage8/wallet"
 	"log"
 	"os"
 	"time"
@@ -85,18 +86,19 @@ func main() {
 	router.GET("/auth/google/callback", auth.GoogleCallbackHandler)
 
 	apiRoute := router.Group("/keys")
-	apiRoute.Use(auth.AuthMiddleware()) // <--- THIS LINE IS CRITICAL
+	apiRoute.Use(auth.ApiAuthMiddleware())
 	{
 		apiRoute.POST("/create", apikey.CreateApiKeyHandler)
 		apiRoute.POST("/rollover", apikey.RollOverApiKeyHandler)
 	}
 
-	// protected := router.Group("/payments")
-	// protected.Use(AuthMiddleware())
-	// {
-	// 	protected.POST("/paystack/initiate", initiatePayment)
-	// 	protected.GET("/:reference/status", checkStatus)
-	// }
+	walletRoute := router.Group("/wallet")
+	walletRoute.Use(wallet.WalletAuthMiddleware())
+	{
+		walletRoute.POST("/deposit", wallet.DepositInWallet)
+		walletRoute.GET("/deposit/:reference/status", wallet.VerifyDepositStatus)
+		walletRoute.POST("/webhook", wallet.PaystackWebHookHandler)
+	}
 
 	serverAddr := os.Getenv("SERVER_ADDRESS")
 	if serverAddr == "" {

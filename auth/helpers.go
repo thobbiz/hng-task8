@@ -6,13 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"hng-stage8/definitions"
+	"hng-stage8/wallet"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 )
 
@@ -74,7 +73,7 @@ func CreateUserAndWallet(ctx context.Context, googleUser definitions.GoogleUserI
 
 	// Check if user wallet exists
 	log.Println("Checking if user wallet exists")
-	exists, err := checkIfWalletExists(ctx, tx, user.ID)
+	exists, err := wallet.CheckIfWalletExists(ctx, tx, user.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +82,7 @@ func CreateUserAndWallet(ctx context.Context, googleUser definitions.GoogleUserI
 	if !exists {
 		// Create Users' Wallet
 		log.Println("Creating user wallet with ID")
-		if err := createWallet(tx, ctx, user.ID); err != nil {
+		if err := wallet.CreateWallet(tx, ctx, user.ID); err != nil {
 			return nil, err
 		}
 		log.Println("Created user wallet successfully")
@@ -115,41 +114,6 @@ func updateOrCreateUser(ctx context.Context, tx *sql.Tx, user definitions.User) 
 	}
 
 	return user, nil
-}
-
-func createWallet(tx *sql.Tx, ctx context.Context, userId string) error {
-	// Get created at time in rfc format
-	currentTime := time.Now().UTC()
-	formattedTime := currentTime.Format(time.RFC3339)
-
-	// Generate a unique uuid for the API key ID
-	uuid := strings.ReplaceAll(uuid.New().String(), "-", "")
-	id := "sk_live_" + uuid
-
-	query := `
-	INSERT INTO wallets (id, user_id, balance, created_at)
-	VALUES (?, ?, ?, ?);
-	`
-
-	_, err := tx.ExecContext(ctx, query, id, userId, 0, formattedTime)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func checkIfWalletExists(ctx context.Context, tx *sql.Tx, userId string) (bool, error) {
-	var exists bool
-	query := "SELECT EXISTS(SELECT 1 FROM wallets WHERE user_id = ?)"
-
-	err := tx.QueryRowContext(ctx, query, userId).Scan(&exists)
-
-	if err != nil && err != sql.ErrNoRows {
-		return false, fmt.Errorf("error checking for existing wallet: %w", err)
-	}
-
-	return exists, nil
 }
 
 func CreateJWTtoken(user definitions.User) (*string, error) {

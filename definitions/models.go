@@ -16,6 +16,9 @@ const (
 	PaystackBaseURL = "https://api.paystack.co"
 	MaxKeysPerUser  = 5
 
+	UserIDKey    = "user_id"
+	UserEmailKey = "user_email"
+
 	PermissionDeposit  Permission = "deposit"
 	PermissionTransfer Permission = "transfer"
 	PermissionRead     Permission = "read"
@@ -60,6 +63,33 @@ var (
 	DB                *sql.DB
 )
 
+type PaystackInitResponse struct {
+	AuthorizationURL string `json:"authorization_url"`
+	Reference        string `json:"reference"`
+}
+
+type Transaction struct {
+	ID        string `json:"id"`
+	WalletID  string `json:"user_id"`
+	Reference string `json:"reference"`
+	Amount    int64  `json:"amount"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
+type PaystackInitRequest struct {
+	Amount int64 `json:"amount" binding:"required,gt=0"`
+}
+
+type PaystackWebhookPayload struct {
+	Event string `json:"event"`
+	Data  struct {
+		Reference string `json:"reference"`
+		Status    string `json:"status"`
+		Amount    int64  `json:"amount"`
+	} `json:"data"`
+}
+
 type ApiKey struct {
 	Name            string   `json:"name"`
 	Permissions     []string `json:"permissions"`
@@ -69,6 +99,10 @@ type ApiKey struct {
 type ApiKeyResponse struct {
 	ApiKey string `json:"api_key"`
 	Expiry string `json:"expires_at"`
+}
+
+type DepositReq struct {
+	Amount int64 `json:"amount"`
 }
 
 type RolloverApiReq struct {

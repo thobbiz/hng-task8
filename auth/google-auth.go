@@ -107,7 +107,7 @@ func GoogleCallbackHandler(ctx *gin.Context) {
 	})
 }
 
-func AuthMiddleware() gin.HandlerFunc {
+func ApiAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {

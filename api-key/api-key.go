@@ -17,7 +17,6 @@ import (
 // @Description  Creates a new api key for the user to access services.
 // @Tags         auth
 // @Produce      json
-// @Param        response_type query string false "Set to 'json' to receive the URL in JSON response instead of redirect"
 // @Success      307  {string}  string "Redirects to Google"
 // //@Success      200  {object}  map[string]string "Returns {google_auth_url: ...}"
 // // @Router       /auth/google [get]p
@@ -63,6 +62,14 @@ func CreateApiKeyHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, definitions.ApiKeyResponse{ApiKey: apiKeyID, Expiry: expiresAt})
 }
 
+// RollOverApiKeyHandler creates a new api key
+// @Summary      Rollover a api key
+// @Description  Creates a new api key for the user with the old api key permissions to access services.
+// @Tags         auth
+// @Produce      json
+// @Success      307  {string}  string "Redirects to Google"
+// //@Success      200  {object}  map[string]string "Returns {google_auth_url: ...}"
+// // @Router       /auth/google [get]p
 func RollOverApiKeyHandler(ctx *gin.Context) {
 	ID, exists := ctx.Get("user_id")
 	if !exists {
