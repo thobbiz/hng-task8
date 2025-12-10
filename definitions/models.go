@@ -63,6 +63,17 @@ var (
 	DB                *sql.DB
 )
 
+type TransferBetweenUserRequest struct {
+	WalletNo string `json:"wallet_number" binding:"required"`
+	Amount   int64  `json:"amount" binding:"required"`
+}
+
+type TransactionHistory struct {
+	Type   string `json:"type"`
+	Amount int64  `json:"amount"`
+	Status string `json:"status"`
+}
+
 type VerifyStatusResponse struct {
 	Reference string `json:"reference"`
 	Status    string `json:"status"`

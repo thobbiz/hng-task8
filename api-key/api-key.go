@@ -14,12 +14,13 @@ import (
 
 // CreateApiKeyHandler creates a new api key
 // @Summary      Creates new api key
-// @Description  Creates a new api key for the user to access services.
+// @Description  Creates a new api key. You must provide EITHER an Authorization token OR an API Key.
 // @Tags         auth
 // @Produce      json
+// @Param        Authorization  header  string  false  "Bearer Token (Use this OR X-API-Key)"
+// @Param        X-API-Key      header  string  false  "API Key (Use this OR Authorization)"
 // @Success      307  {string}  string "Redirects to Google"
-// //@Success      200  {object}  map[string]string "Returns {google_auth_url: ...}"
-// // @Router       /auth/google [get]p
+// @Router       /auth/google [get]
 func CreateApiKeyHandler(ctx *gin.Context) {
 	ID, exists := ctx.Get("user_id")
 	if !exists {

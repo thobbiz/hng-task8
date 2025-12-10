@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hng-stage8/definitions"
 	"hng-stage8/util"
@@ -56,14 +57,14 @@ func DepositInWallet(ctx *gin.Context) {
 	}
 
 	// Get wallet ID
-	walletID, err := GetWalletID(definitions.DB, ctx, userId)
+	walletID, err := GetWalletIDFromUserID(definitions.DB, ctx, userId)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to get wallet id for user %s: %v", userId, err)))
 		return
 	}
 
 	// Create transaction
-	err = CreateTransaction(definitions.DB, ctx, "deposit", walletID, req.Amount, paystackResp.Reference)
+	err = CreateDepositTransaction(definitions.DB, ctx, walletID, req.Amount, paystackResp.Reference)
 	if err != nil {
 		log.Printf("DB Error: %v", err)
 		ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to create transaction: %v", err)))
@@ -90,9 +91,32 @@ func GetWalletBalanceHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"balance": balance})
 }
 
-// PaystackWebHookHandler retrieves a stream of the transaction status
-// @Summary      Checks and saves Deposit status
-// @Description  Get the current status of a transaction from Paystack
+func GetWalletTransactionHistoryHandler(ctx *gin.Context) {
+	id, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "User id not found in context"})
+		return
+	}
+	userId := id.(string)
+
+	walletID, err := GetWalletIDFromUserID(definitions.DB, ctx, userId)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to get wallet ID for user %s: %v", userId, err)))
+		return
+	}
+
+	history, err := GetWalletTransactionHistory(definitions.DB, ctx, walletID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to get wallet transaction history for user %s: %v", userId, err)))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, history)
+}
+
+// PaystackWebHookHandler retrieves a stream of the deposit transaction status
+// @Summary      Checks and saves deposit status from Paystack
+// @Description  Get and saves the current status of a transaction from Paystack
 // @Tags         payments
 // @Produce      json
 // @Success      200  {object}  Transaction
@@ -170,6 +194,60 @@ func VerifyDepositStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
+}
+
+func TransferBetweenUserHandler(ctx *gin.Context) {
+	id, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, util.ErrorResponse(errors.New("User id not found in context")))
+		return
+	}
+	userId := id.(string)
+
+	var req definitions.TransferBetweenUserRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		log.Printf("failed to bind request: %v\n", err)
+		ctx.JSON(http.StatusBadRequest, util.ErrorResponse(fmt.Errorf("Failed to bind request: %v", err)))
+		return
+	}
+
+	userWalletID, err := GetWalletIDFromUserID(definitions.DB, ctx, userId)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			ctx.JSON(http.StatusNotFound, util.ErrorResponse(errors.New("User wallet not found")))
+		} else {
+			ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to get user wallet ID: %v", err)))
+		}
+		return
+	}
+
+	receiverWalletID, err := GetWalletIDFromWalletNo(definitions.DB, ctx, req.WalletNo)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			ctx.JSON(http.StatusNotFound, util.ErrorResponse(errors.New("Wallet not found")))
+		} else {
+			ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to get receiver wallet ID: %v", err)))
+		}
+		return
+	}
+
+	// Check If user has sufficient balance
+	isSufficient, err := verifyBalanceIsSufficient(definitions.DB, userWalletID, req.Amount)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Could not verify balance: %v", err)))
+		return
+	}
+	if !isSufficient {
+		ctx.JSON(http.StatusBadRequest, util.ErrorResponse(fmt.Errorf("Insufficient balance")))
+		return
+	}
+
+	// Transfer Money between the two users
+	err = TransferBetweenUser(definitions.DB, ctx, req.Amount, userWalletID, receiverWalletID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to transfer money: %v", err)))
+		return
+	}
 }
 
 func processChargeSuccess(payload definitions.PaystackWebhookPayload) {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hng-stage8/definitions"
+	"log"
 	"math/rand/v2"
 	"net/http"
 	"os"
@@ -41,7 +42,7 @@ func CreateWallet(tx *sql.Tx, ctx context.Context, userId string) (string, error
 	return walletNumber, nil
 }
 
-func CreateTransaction(db *sql.DB, ctx context.Context, depositType string, walletID string, Amount int64, reference string) error {
+func CreateDepositTransaction(db *sql.DB, ctx context.Context, walletID string, amount int64, reference string) error {
 	// Get created at time in rfc format
 	currentTime := time.Now().UTC()
 	formattedTime := currentTime.Format(time.RFC3339)
@@ -53,7 +54,7 @@ func CreateTransaction(db *sql.DB, ctx context.Context, depositType string, wall
 	INSERT INTO transactions (id, wallet_id, type, amount, created_at, reference)
 	VALUES (?, ?, ?, ?, ?, ?);
 	`
-	_, err := db.ExecContext(ctx, query, uuid, walletID, depositType, Amount, formattedTime, reference)
+	_, err := db.ExecContext(ctx, query, uuid, walletID, "deposit", amount, formattedTime, reference)
 	if err != nil {
 		return err
 	}
@@ -61,12 +62,99 @@ func CreateTransaction(db *sql.DB, ctx context.Context, depositType string, wall
 	return nil
 }
 
-func AddAmountToWallet(tx *sql.Tx, ctx context.Context, Amount int64, walletID string) error {
+func CreateTransferTransaction(tx *sql.Tx, ctx context.Context, walletID string, amount int64) error {
+	// Get created at time in rfc format
+	currentTime := time.Now().UTC()
+	formattedTime := currentTime.Format(time.RFC3339)
+
+	// Generate a unique uuid for the transaction ID
+	uuid := strings.ReplaceAll(uuid.New().String(), "-", "")
+
+	query := `
+	INSERT INTO transactions (id, wallet_id, type, amount, created_at)
+	VALUES (?, ?, ?, ?, ?);
+	`
+	_, err := tx.ExecContext(ctx, query, uuid, walletID, "transfer", amount, formattedTime)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func TransferBetweenUser(db *sql.DB, ctx context.Context, amount int64, userWalletID string, receiverWalletID string) error {
+	tx, err := definitions.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w\n", err)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r)
+		}
+		if err != nil {
+			log.Println("Rolling back tx...")
+			tx.Rollback()
+		}
+	}()
+
+	// Remove Amount From Wallet
+	if err := RemoveAmountFromWallet(tx, ctx, amount, userWalletID); err != nil {
+		return err
+	}
+
+	// Add Amount To Receiver Wallet
+	if err := AddAmountToWallet(tx, ctx, amount, receiverWalletID); err != nil {
+		return err
+	}
+
+	// Add transaction to history
+	if err := CreateTransferTransaction(tx, ctx, userWalletID, amount); err != nil {
+		return err
+	}
+
+	// Commit transaction
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w\n", err)
+	}
+
+	return nil
+}
+
+func GetWalletTransactionHistory(db *sql.DB, ctx context.Context, userWalletID string) ([]definitions.TransactionHistory, error) {
+	query := `
+	SELECT type, amount, status FROM transactions WHERE wallet_id = ?;
+	`
+
+	rows, err := db.QueryContext(ctx, query, userWalletID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute transaction history query: %w", err)
+	}
+	defer rows.Close()
+
+	var history []definitions.TransactionHistory
+	for rows.Next() {
+		var transaction definitions.TransactionHistory
+		if err := rows.Scan(&transaction.Type, &transaction.Amount, &transaction.Status); err != nil {
+			return nil, fmt.Errorf("failed to scan transaction history row: %w", err)
+		}
+		history = append(history, transaction)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate transaction history rows: %w", err)
+	}
+
+	return history, nil
+}
+
+func AddAmountToWallet(tx *sql.Tx, ctx context.Context, amount int64, walletID string) error {
 	query := `
 	UPDATE wallets SET balance = balance + ? WHERE id = ?;
 	`
 
-	result, err := tx.ExecContext(ctx, query, Amount, walletID)
+	result, err := tx.ExecContext(ctx, query, amount, walletID)
 	if err != nil {
 		return fmt.Errorf("failed to execute wallet update: %w", err)
 	}
@@ -82,12 +170,12 @@ func AddAmountToWallet(tx *sql.Tx, ctx context.Context, Amount int64, walletID s
 	return nil
 }
 
-func RemoveAmountFromWallet(tx *sql.Tx, ctx context.Context, Amount int64, walletID string) error {
+func RemoveAmountFromWallet(tx *sql.Tx, ctx context.Context, amount int64, walletID string) error {
 	query := `
 	UPDATE wallets SET balance = balance - ? WHERE id = ?;
 	`
 
-	result, err := tx.ExecContext(ctx, query, Amount, walletID)
+	result, err := tx.ExecContext(ctx, query, amount, walletID)
 	if err != nil {
 		return fmt.Errorf("failed to execute wallet update: %w", err)
 	}
@@ -149,11 +237,24 @@ func UpdateTransactionStatus(tx *sql.Tx, ctx context.Context, transactionID stri
 	return nil
 }
 
-func GetWalletID(db *sql.DB, ctx context.Context, userId string) (string, error) {
+func GetWalletIDFromUserID(db *sql.DB, ctx context.Context, userId string) (string, error) {
 	var walletID string
 	query := "SELECT id FROM wallets WHERE user_id = ?"
 
 	err := db.QueryRowContext(ctx, query, userId).Scan(&walletID)
+
+	if err != nil && err != sql.ErrNoRows {
+		return "", fmt.Errorf("error getting wallet ID: %w", err)
+	}
+
+	return walletID, nil
+}
+
+func GetWalletIDFromWalletNo(db *sql.DB, ctx context.Context, walletNo string) (string, error) {
+	var walletID string
+	query := "SELECT id FROM wallets WHERE number = ?"
+
+	err := db.QueryRowContext(ctx, query, walletNo).Scan(&walletID)
 
 	if err != nil && err != sql.ErrNoRows {
 		return "", fmt.Errorf("error getting wallet ID: %w", err)
@@ -238,4 +339,17 @@ func verifySignature(body []byte, signature string) bool {
 	expectedMAC := mac.Sum(nil)
 	expectedSignature := hex.EncodeToString(expectedMAC)
 	return hmac.Equal([]byte(expectedSignature), []byte(signature))
+}
+
+func verifyBalanceIsSufficient(db *sql.DB, walletId string, amount int64) (bool, error) {
+	query := "SELECT balance FROM wallets WHERE id = ?"
+
+	var balance int64
+	err := db.QueryRow(query, walletId).Scan(&balance)
+
+	if err != nil {
+		return false, fmt.Errorf("error checking balance: %w", err)
+	}
+
+	return balance >= amount, nil
 }

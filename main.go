@@ -97,10 +97,12 @@ func main() {
 	{
 		walletRoute.POST("/deposit", wallet.DepositInWallet)
 		walletRoute.GET("/deposit/:reference/status", wallet.VerifyDepositStatus)
-		walletRoute.POST("/paystack/webhook", wallet.PaystackWebHookHandler)
 	}
 
+	router.POST("/wallet/paystack/webhook", wallet.PaystackWebHookHandler)
 	router.GET("/wallet/balance", wallet.ReadAuthMiddleware(), wallet.GetWalletBalanceHandler)
+	router.POST("/wallet/transfer", wallet.TransferAuthMiddleware(), wallet.TransferBetweenUserHandler)
+	router.GET("/wallet/transactions", wallet.ReadAuthMiddleware(), wallet.GetWalletTransactionHistoryHandler)
 
 	serverAddr := os.Getenv("SERVER_ADDRESS")
 	if serverAddr == "" {
