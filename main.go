@@ -97,7 +97,7 @@ func main() {
 	{
 		walletRoute.POST("/deposit", wallet.DepositInWallet)
 		walletRoute.GET("/deposit/:reference/status", wallet.VerifyDepositStatus)
-		walletRoute.POST("/webhook", wallet.PaystackWebHookHandler)
+		walletRoute.POST("/paystack/webhook", wallet.PaystackWebHookHandler)
 	}
 
 	serverAddr := os.Getenv("SERVER_ADDRESS")

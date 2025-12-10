@@ -71,6 +71,13 @@ func DepositInWallet(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, paystackResp)
 }
 
+// PaystackWebHookHandler retrieves a stream of the transaction status
+// @Summary      Checks and saves Deposit status
+// @Description  Get the current status of a transaction from Paystack
+// @Tags         payments
+// @Produce      json
+// @Success      200  {object}  Transaction
+// @Router       /payments/{reference}/status [get]
 func PaystackWebHookHandler(ctx *gin.Context) {
 	paystackSignature := ctx.GetHeader("x-paystack-signature")
 	payloadBytes, err := ctx.GetRawData()
@@ -100,8 +107,8 @@ func PaystackWebHookHandler(ctx *gin.Context) {
 	ctx.Status(http.StatusOK)
 }
 
-// checkStatus retrieves the transaction status
-// @Summary      Check Status
+// VerifyDepositStatus retrieves the transaction status
+// @Summary      Check Deposit status
 // @Description  Get the current status of a transaction from DB (or Paystack)
 // @Tags         payments
 // @Produce      json
@@ -133,6 +140,10 @@ func VerifyDepositStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, tx)
+}
+
+func GetWalletBalance(c *gin.Context) {
+
 }
 
 func processChargeSuccess(payload definitions.PaystackWebhookPayload, ctx *gin.Context) {
@@ -246,8 +257,9 @@ func tryAPIKeyAuth(ctx *gin.Context) error {
 
 	err := definitions.DB.QueryRowContext(
 		ctx,
-		"SELECT user_id FROM api_keys WHERE id = ?",
+		"SELECT * FROM api_key_permissions WHERE api_key_id = ? AND permission_id = ?",
 		apiKey,
+		"deposit",
 	).Scan(&userID)
 
 	if err != nil {
