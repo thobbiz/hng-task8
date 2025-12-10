@@ -100,6 +100,8 @@ func main() {
 		walletRoute.POST("/paystack/webhook", wallet.PaystackWebHookHandler)
 	}
 
+	router.GET("/wallet/balance", wallet.ReadAuthMiddleware(), wallet.GetWalletBalanceHandler)
+
 	serverAddr := os.Getenv("SERVER_ADDRESS")
 	if serverAddr == "" {
 		serverAddr = ":8080"

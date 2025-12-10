@@ -79,7 +79,7 @@ func AddAmountToWallet(tx *sql.Tx, ctx context.Context, Amount int64, walletID s
 	return nil
 }
 
-func callPaystackVerify(ref string) (string, error) {
+func CallPaystackVerify(ref string) (string, error) {
 	url := "https://api.paystack.co/transaction/verify/" + ref
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", "Bearer "+os.Getenv("PAYSTACK_SECRET_KEY"))
@@ -136,6 +136,19 @@ func GetWalletID(db *sql.DB, ctx context.Context, userId string) (string, error)
 	}
 
 	return walletID, nil
+}
+
+func GetWalletBalance(db *sql.DB, ctx context.Context, userID string) (*int64, error) {
+	var walletBalance int64
+	query := "SELECT balance FROM wallets WHERE user_id = ?"
+
+	err := db.QueryRowContext(ctx, query, userID).Scan(&walletBalance)
+
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("error getting wallet ID: %w", err)
+	}
+
+	return &walletBalance, nil
 }
 
 func GetTransactionAndWalletIDAndAmount(db *sql.DB, ctx context.Context, reference string) (string, string, int64, error) {

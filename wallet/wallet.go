@@ -73,6 +73,23 @@ func DepositInWallet(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, paystackResp)
 }
 
+func GetWalletBalanceHandler(ctx *gin.Context) {
+	id, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "User id not found in context"})
+		return
+	}
+	userId := id.(string)
+
+	balance, err := GetWalletBalance(definitions.DB, ctx, userId)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to get wallet balance for user %s: %v", userId, err)))
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"balance": balance})
+}
+
 // PaystackWebHookHandler retrieves a stream of the transaction status
 // @Summary      Checks and saves Deposit status
 // @Description  Get the current status of a transaction from Paystack
@@ -139,7 +156,7 @@ func VerifyDepositStatus(c *gin.Context) {
 	}
 
 	if tx.Status == "pending" {
-		realStatus, err := callPaystackVerify(ref)
+		realStatus, err := CallPaystackVerify(ref)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify transaction status"})
 			return
@@ -153,10 +170,6 @@ func VerifyDepositStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
-}
-
-func GetWalletBalance(c *gin.Context) {
-
 }
 
 func processChargeSuccess(payload definitions.PaystackWebhookPayload) {
