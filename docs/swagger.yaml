@@ -1,12 +1,51 @@
 basePath: /
 definitions:
+  definitions.PaystackInitRequest:
+    description: Request body for initializing a Paystack payment
+    properties:
+      amount:
+        example: 10000
+        type: integer
+    required:
+    - amount
+    type: object
+  definitions.TransferBetweenUserRequest:
+    description: Request body for transferring funds between user wallets
+    properties:
+      amount:
+        example: 5000
+        type: integer
+      wallet_number:
+        example: "1234567890"
+        type: string
+    required:
+    - amount
+    - wallet_number
+    type: object
   definitions.User:
+    description: User account information
     properties:
       email:
+        example: user@example.com
         type: string
       name:
+        example: John Doe
         type: string
       user_id:
+        example: usr_abc123def456
+        type: string
+    type: object
+  definitions.VerifyStatusResponse:
+    description: Response containing payment verification status
+    properties:
+      amount:
+        example: 10000
+        type: integer
+      reference:
+        example: txn_ref_123456
+        type: string
+      status:
+        example: success
         type: string
     type: object
 host: localhost:8080
@@ -25,6 +64,29 @@ info:
   title: Google auth $ Paystack Payment API
   version: "1.0"
 paths:
+  /auth/google:
+    get:
+      description: Creates a new api key. You must provide EITHER an Authorization
+        token OR an API Key.
+      parameters:
+      - description: Bearer Token (Use this OR X-API-Key)
+        in: header
+        name: Authorization
+        type: string
+      - description: API Key (Use this OR Authorization)
+        in: header
+        name: X-API-Key
+        type: string
+      produces:
+      - application/json
+      responses:
+        "307":
+          description: Redirects to Google
+          schema:
+            type: string
+      summary: Creates new api key
+      tags:
+      - auth
   /auth/google/callback:
     get:
       description: |-
@@ -82,4 +144,180 @@ paths:
       tags:
       - auth
       - auth
+  /payments/{reference}/status:
+    get:
+      description: Get the current status of a transaction from DB (or Paystack)
+      parameters:
+      - description: Transaction Reference
+        in: path
+        name: reference
+        required: true
+        type: string
+      - description: Force refresh from Paystack
+        in: query
+        name: refresh
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/definitions.VerifyStatusResponse'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Check Deposit status
+      tags:
+      - payments
+  /payments/paystack/initiate:
+    post:
+      consumes:
+      - application/json
+      description: Creates a payment link for the user to deposit into their wallet
+      parameters:
+      - description: Payment Request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/definitions.PaystackInitRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Initiate Deposit
+      tags:
+      - payments
+  /wallet/balance:
+    get:
+      description: Retrieves the current balance of the authenticated user's wallet
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      - ApiKeyAuth: []
+      summary: Get Wallet Balance
+      tags:
+      - wallet
+  /wallet/transactions:
+    get:
+      description: Retrieves all transactions associated with the authenticated user's
+        wallet
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      - ApiKeyAuth: []
+      summary: Get Wallet Transaction History
+      tags:
+      - wallet
+  /wallet/transfer:
+    post:
+      consumes:
+      - application/json
+      description: Transfers a specified amount from the authenticated user's wallet
+        to another user's wallet using wallet number
+      parameters:
+      - description: Transfer Request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/definitions.TransferBetweenUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      - ApiKeyAuth: []
+      summary: Transfer Funds Between Users
+      tags:
+      - wallet
 swagger: "2.0"

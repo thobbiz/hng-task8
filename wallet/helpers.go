@@ -243,7 +243,10 @@ func GetWalletIDFromUserID(db *sql.DB, ctx context.Context, userId string) (stri
 
 	err := db.QueryRowContext(ctx, query, userId).Scan(&walletID)
 
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", fmt.Errorf("wallet not found for user %s", userId)
+		}
 		return "", fmt.Errorf("error getting wallet ID: %w", err)
 	}
 

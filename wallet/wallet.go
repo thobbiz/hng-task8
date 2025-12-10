@@ -23,7 +23,7 @@ import (
 // @Tags         payments
 // @Accept       json
 // @Produce      json
-// @Param        request body PaystackInitRequest true "Payment Request"
+// @Param        request body definitions.PaystackInitRequest true "Payment Request"
 // @Success      201  {object}  map[string]any
 // @Failure      400  {object}  map[string]string
 // @Failure      502  {object}  map[string]string
@@ -74,6 +74,17 @@ func DepositInWallet(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, paystackResp)
 }
 
+// GetWalletBalanceHandler retrieves the user's wallet balance
+// @Summary      Get Wallet Balance
+// @Description  Retrieves the current balance of the authenticated user's wallet
+// @Tags         wallet
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Failure      401  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Security     BearerAuth
+// @Security     ApiKeyAuth
+// @Router       /wallet/balance [get]
 func GetWalletBalanceHandler(ctx *gin.Context) {
 	id, exists := ctx.Get("user_id")
 	if !exists {
@@ -91,6 +102,17 @@ func GetWalletBalanceHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"balance": balance})
 }
 
+// GetWalletTransactionHistoryHandler retrieves the user's wallet transaction history
+// @Summary      Get Wallet Transaction History
+// @Description  Retrieves all transactions associated with the authenticated user's wallet
+// @Tags         wallet
+// @Produce      json
+// @Success      200  {array}   map[string]any
+// @Failure      401  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Security     BearerAuth
+// @Security     ApiKeyAuth
+// @Router       /wallet/transactions [get]
 func GetWalletTransactionHistoryHandler(ctx *gin.Context) {
 	id, exists := ctx.Get("user_id")
 	if !exists {
@@ -119,7 +141,7 @@ func GetWalletTransactionHistoryHandler(ctx *gin.Context) {
 // @Description  Get and saves the current status of a transaction from Paystack
 // @Tags         payments
 // @Produce      json
-// @Success      200  {object}  Transaction
+// @Success      200
 // @Router       /payments/{reference}/status [get]
 func PaystackWebHookHandler(ctx *gin.Context) {
 	for name, values := range ctx.Request.Header {
@@ -163,7 +185,7 @@ func PaystackWebHookHandler(ctx *gin.Context) {
 // @Produce      json
 // @Param        reference path string true "Transaction Reference"
 // @Param        refresh query boolean false "Force refresh from Paystack"
-// @Success      200  {object}  Transaction
+// @Success      200  {object}  definitions.VerifyStatusResponse
 // @Failure      404  {object}  map[string]string
 // @Router       /payments/{reference}/status [get]
 func VerifyDepositStatus(c *gin.Context) {
@@ -196,6 +218,21 @@ func VerifyDepositStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// TransferBetweenUserHandler transfers funds between user wallets
+// @Summary      Transfer Funds Between Users
+// @Description  Transfers a specified amount from the authenticated user's wallet to another user's wallet using wallet number
+// @Tags         wallet
+// @Accept       json
+// @Produce      json
+// @Param        request body definitions.TransferBetweenUserRequest true "Transfer Request"
+// @Success      200  {object}  map[string]any
+// @Failure      400  {object}  map[string]string
+// @Failure      401  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Security     BearerAuth
+// @Security     ApiKeyAuth
+// @Router       /wallet/transfer [post]
 func TransferBetweenUserHandler(ctx *gin.Context) {
 	id, exists := ctx.Get("user_id")
 	if !exists {
@@ -248,6 +285,8 @@ func TransferBetweenUserHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to transfer money: %v", err)))
 		return
 	}
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "message": "Transfer successful"})
 }
 
 func processChargeSuccess(payload definitions.PaystackWebhookPayload) {
@@ -410,27 +449,43 @@ func tryJWTAuth(ctx *gin.Context) error {
 
 // Checks if Api key from header is valid and has the right permissions
 func tryAPIKeyAuth(ctx *gin.Context, permissionID string) (bool, error) {
-	apiKey := ctx.GetHeader("X-API-Key")
+	apiKey := ctx.GetHeader("x-api-key")
 	if apiKey == "" {
-		return false, fmt.Errorf("X-API-Key header missing")
+		return false, fmt.Errorf("x-api-key header missing")
 	}
 
 	query := `
-        SELECT u.email, u.id
+        SELECT u.email, u.id, ak.expires_at
         FROM users u
         INNER JOIN api_keys ak ON u.id = ak.user_id
         INNER JOIN api_key_permissions akp ON ak.id = akp.api_key_id
         WHERE ak.id = ? AND akp.permission_id = ?
     `
 
-	var userEmail, userID string
-	err := definitions.DB.QueryRow(query, apiKey, permissionID).Scan(&userEmail, &userID)
+	var userEmail, userID, expiresAt string
+	err := definitions.DB.QueryRow(query, apiKey, permissionID).Scan(&userEmail, &userID, &expiresAt)
 
 	if err == sql.ErrNoRows {
 		return false, fmt.Errorf("Invalid API key or missing permission")
 	}
 	if err != nil {
 		return false, err // Database error
+	}
+
+	// Convert expiresAt to time.Time
+	expiresTime, err := util.ConvertRFC3339ToTime(expiresAt)
+	if err != nil {
+		return false, fmt.Errorf("Cannot convert expiration time")
+	}
+
+	// Check if the API key has expired
+	isExpired := util.CheckIfTimeIsExpired(expiresTime)
+	if err != nil {
+		return false, fmt.Errorf("Invalid expiration time format")
+	}
+
+	if isExpired {
+		return false, fmt.Errorf("API key has expired")
 	}
 
 	ctx.Set(definitions.UserEmailKey, userEmail)
