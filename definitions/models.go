@@ -63,6 +63,12 @@ var (
 	DB                *sql.DB
 )
 
+type VerifyStatusResponse struct {
+	Reference string `json:"reference"`
+	Status    string `json:"status"`
+	Amount    int64  `json:"amount"`
+}
+
 type PaystackInitResponse struct {
 	AuthorizationURL string `json:"authorization_url"`
 	Reference        string `json:"reference"`

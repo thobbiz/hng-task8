@@ -38,7 +38,7 @@ func CreateWallet(tx *sql.Tx, ctx context.Context, userId string) error {
 	return nil
 }
 
-func CreateTransaction(db *sql.DB, ctx context.Context, depositType string, walletID string, Amount int64) error {
+func CreateTransaction(db *sql.DB, ctx context.Context, depositType string, walletID string, Amount int64, reference string) error {
 	// Get created at time in rfc format
 	currentTime := time.Now().UTC()
 	formattedTime := currentTime.Format(time.RFC3339)
@@ -47,10 +47,10 @@ func CreateTransaction(db *sql.DB, ctx context.Context, depositType string, wall
 	uuid := strings.ReplaceAll(uuid.New().String(), "-", "")
 
 	query := `
-	INSERT INTO transactions (id, wallet_id, type, amount, created_at)
-	VALUES (?, ?, ?, ?, ?);
+	INSERT INTO transactions (id, wallet_id, type, amount, created_at, reference)
+	VALUES (?, ?, ?, ?, ?, ?);
 	`
-	_, err := db.ExecContext(ctx, query, uuid, walletID, depositType, Amount, formattedTime)
+	_, err := db.ExecContext(ctx, query, uuid, walletID, depositType, Amount, formattedTime, reference)
 	if err != nil {
 		return err
 	}

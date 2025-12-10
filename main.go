@@ -93,7 +93,7 @@ func main() {
 	}
 
 	walletRoute := router.Group("/wallet")
-	walletRoute.Use(wallet.WalletAuthMiddleware())
+	walletRoute.Use(wallet.DepositAuthMiddleware())
 	{
 		walletRoute.POST("/deposit", wallet.DepositInWallet)
 		walletRoute.GET("/deposit/:reference/status", wallet.VerifyDepositStatus)

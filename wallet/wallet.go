@@ -1,6 +1,7 @@
 package wallet
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -61,7 +63,7 @@ func DepositInWallet(ctx *gin.Context) {
 	}
 
 	// Create transaction
-	err = CreateTransaction(definitions.DB, ctx, "deposit", walletID, req.Amount)
+	err = CreateTransaction(definitions.DB, ctx, "deposit", walletID, req.Amount, paystackResp.Reference)
 	if err != nil {
 		log.Printf("DB Error: %v", err)
 		ctx.JSON(http.StatusInternalServerError, util.ErrorResponse(fmt.Errorf("Failed to create transaction: %v", err)))
@@ -79,6 +81,12 @@ func DepositInWallet(ctx *gin.Context) {
 // @Success      200  {object}  Transaction
 // @Router       /payments/{reference}/status [get]
 func PaystackWebHookHandler(ctx *gin.Context) {
+	for name, values := range ctx.Request.Header {
+		for _, value := range values {
+			fmt.Printf("Header: %s = %s\n", name, value)
+		}
+	}
+
 	paystackSignature := ctx.GetHeader("x-paystack-signature")
 	payloadBytes, err := ctx.GetRawData()
 	if err != nil {
@@ -101,7 +109,7 @@ func PaystackWebHookHandler(ctx *gin.Context) {
 	}
 
 	if payload.Event == "charge.success" {
-		go processChargeSuccess(payload, ctx)
+		go processChargeSuccess(payload)
 	}
 
 	ctx.Status(http.StatusOK)
@@ -120,6 +128,7 @@ func PaystackWebHookHandler(ctx *gin.Context) {
 func VerifyDepositStatus(c *gin.Context) {
 	ref := c.Param("reference")
 
+	var resp definitions.VerifyStatusResponse
 	var tx definitions.Transaction
 	query := `SELECT reference, amount, status FROM transactions WHERE reference = ?`
 	err := definitions.DB.QueryRow(query, ref).Scan(&tx.Reference, &tx.Amount, &tx.Status)
@@ -137,25 +146,32 @@ func VerifyDepositStatus(c *gin.Context) {
 		}
 
 		tx.Status = realStatus
+
+		resp.Amount = tx.Amount
+		resp.Reference = tx.Reference
+		resp.Status = realStatus
 	}
 
-	c.JSON(http.StatusOK, tx)
+	c.JSON(http.StatusOK, resp)
 }
 
 func GetWalletBalance(c *gin.Context) {
 
 }
 
-func processChargeSuccess(payload definitions.PaystackWebhookPayload, ctx *gin.Context) {
+func processChargeSuccess(payload definitions.PaystackWebhookPayload) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	txID, walletID, amount, err := GetTransactionAndWalletIDAndAmount(definitions.DB, ctx, payload.Data.Reference)
 	if err != nil {
-		log.Printf("Webhook DB Error (GetTx): Ref: %s, Error: %v", payload.Data.Reference, err)
+		fmt.Printf("Webhook DB Error (GetTx): Ref: %s, Error: %v\n", payload.Data.Reference, err)
 		return
 	}
 
 	tx, err := definitions.DB.BeginTx(ctx, nil)
 	if err != nil {
-		log.Printf("DB Error: Failed to start transaction: %v", err)
+		fmt.Printf("DB Error: Failed to start transaction: %v\n", err)
 		return
 	}
 	defer tx.Rollback()
@@ -163,26 +179,27 @@ func processChargeSuccess(payload definitions.PaystackWebhookPayload, ctx *gin.C
 	// Update transaction status
 	err = UpdateTransactionStatus(tx, ctx, txID, "success")
 	if err != nil {
-		log.Printf("DB Error: Failed to update transaction status for tx %s: %v", txID, err)
+		fmt.Printf("DB Error: Failed to update transaction status for tx %s: %v\n", txID, err)
 		return
 	}
 
 	// Update transaction balance
 	err = AddAmountToWallet(tx, ctx, amount, walletID)
 	if err != nil {
-		log.Printf("CRITICAL DB Error: Failed to add amount to wallet %s for tx %s: %v", walletID, txID, err)
+		fmt.Printf("CRITICAL DB Error: Failed to add amount to wallet %s for tx %s: %v\n", walletID, txID, err)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		log.Printf("CRITICAL DB Error: Failed to commit transaction for tx %s: %v", txID, err)
+		fmt.Printf("CRITICAL DB Error: Failed to commit transaction for tx %s: %v\n", txID, err)
 		return
 	}
 
-	log.Printf("SUCCESS: Wallet %s credited %.2f for transaction %s", walletID, float64(amount)/100, txID)
+	fmt.Printf("SUCCESS: Wallet %s credited %.2f for transaction %s\n", walletID, float64(amount)/100, txID)
 }
 
-func WalletAuthMiddleware() gin.HandlerFunc {
+// Middleware for read operations
+func ReadAuthMiddleware() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		jwtErr := tryJWTAuth(ctx)
 		if jwtErr == nil {
@@ -190,8 +207,8 @@ func WalletAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		apiKeyErr := tryAPIKeyAuth(ctx)
-		if apiKeyErr == nil {
+		valid, apiKeyErr := tryAPIKeyAuth(ctx, "perm_read")
+		if valid && apiKeyErr == nil {
 			ctx.Next()
 			return
 		}
@@ -207,6 +224,33 @@ func WalletAuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// Middleware for deposit operations
+func DepositAuthMiddleware() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		jwtErr := tryJWTAuth(ctx)
+		if jwtErr == nil {
+			ctx.Next()
+			return
+		}
+
+		valid, apiKeyErr := tryAPIKeyAuth(ctx, "perm_deposit")
+		if valid && apiKeyErr == nil {
+			ctx.Next()
+			return
+		}
+
+		finalError := "Authentication required or credentials invalid."
+		if jwtErr != nil && !strings.Contains(jwtErr.Error(), "header missing") {
+			finalError = fmt.Sprintf("JWT validation failed: %s", jwtErr.Error())
+		} else if apiKeyErr != nil {
+			finalError = fmt.Sprintf("API Key validation failed: %s", apiKeyErr.Error())
+		}
+
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": finalError})
+	}
+}
+
+// Checks if jwt from header is valid
 func tryJWTAuth(ctx *gin.Context) error {
 	authHeader := ctx.GetHeader("Authorization")
 	if authHeader == "" {
@@ -247,30 +291,33 @@ func tryJWTAuth(ctx *gin.Context) error {
 	return nil
 }
 
-func tryAPIKeyAuth(ctx *gin.Context) error {
+// Checks if Api key from header is valid and has the right permissions
+func tryAPIKeyAuth(ctx *gin.Context, permissionID string) (bool, error) {
 	apiKey := ctx.GetHeader("X-API-Key")
 	if apiKey == "" {
-		return fmt.Errorf("X-API-Key header missing")
+		return false, fmt.Errorf("X-API-Key header missing")
 	}
 
-	var userID string
+	query := `
+        SELECT u.email, u.id
+        FROM users u
+        INNER JOIN api_keys ak ON u.id = ak.user_id
+        INNER JOIN api_key_permissions akp ON ak.id = akp.api_key_id
+        WHERE ak.id = ? AND akp.permission_id = ?
+    `
 
-	err := definitions.DB.QueryRowContext(
-		ctx,
-		"SELECT * FROM api_key_permissions WHERE api_key_id = ? AND permission_id = ?",
-		apiKey,
-		"deposit",
-	).Scan(&userID)
+	var userEmail, userID string
+	err := definitions.DB.QueryRow(query, apiKey, permissionID).Scan(&userEmail, &userID)
 
+	if err == sql.ErrNoRows {
+		return false, fmt.Errorf("Invalid API key or missing permission")
+	}
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("API Key not found")
-		}
-		// General database error
-		return fmt.Errorf("database error checking API key: %w", err)
+		return false, err // Database error
 	}
 
+	ctx.Set(definitions.UserEmailKey, userEmail)
 	ctx.Set(definitions.UserIDKey, userID)
 
-	return nil
+	return true, nil
 }
