@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hng-stage8/definitions"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"strings"
@@ -17,7 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func CreateWallet(tx *sql.Tx, ctx context.Context, userId string) error {
+func CreateWallet(tx *sql.Tx, ctx context.Context, userId string) (string, error) {
 	// Get created at time in rfc format
 	currentTime := time.Now().UTC()
 	formattedTime := currentTime.Format(time.RFC3339)
@@ -25,17 +26,19 @@ func CreateWallet(tx *sql.Tx, ctx context.Context, userId string) error {
 	// Generate a unique uuid for the wallet ID
 	uuid := strings.ReplaceAll(uuid.New().String(), "-", "")
 
+	walletNumber := GenerateRandomWalletNumber()
+
 	query := `
-	INSERT INTO wallets (id, user_id, balance, created_at)
-	VALUES (?, ?, ?, ?);
+	INSERT INTO wallets (id, user_id, balance, created_at, number)
+	VALUES (?, ?, ?, ?, ?);
 	`
 
-	_, err := tx.ExecContext(ctx, query, uuid, userId, 0, formattedTime)
+	_, err := tx.ExecContext(ctx, query, uuid, userId, 0, formattedTime, walletNumber)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return walletNumber, nil
 }
 
 func CreateTransaction(db *sql.DB, ctx context.Context, depositType string, walletID string, Amount int64, reference string) error {
@@ -61,6 +64,27 @@ func CreateTransaction(db *sql.DB, ctx context.Context, depositType string, wall
 func AddAmountToWallet(tx *sql.Tx, ctx context.Context, Amount int64, walletID string) error {
 	query := `
 	UPDATE wallets SET balance = balance + ? WHERE id = ?;
+	`
+
+	result, err := tx.ExecContext(ctx, query, Amount, walletID)
+	if err != nil {
+		return fmt.Errorf("failed to execute wallet update: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("wallet not found with ID: %s", walletID)
+	}
+
+	return nil
+}
+
+func RemoveAmountFromWallet(tx *sql.Tx, ctx context.Context, Amount int64, walletID string) error {
+	query := `
+	UPDATE wallets SET balance = balance - ? WHERE id = ?;
 	`
 
 	result, err := tx.ExecContext(ctx, query, Amount, walletID)
@@ -195,6 +219,17 @@ func CheckIfApiKeyHasPermit(tx *sql.Tx, ctx context.Context, apiKeyID string, pe
 	}
 
 	return exists, nil
+}
+
+func GenerateRandomWalletNumber() string {
+	var sb strings.Builder
+
+	for range 13 {
+		num := rand.N(10)
+		sb.WriteString(fmt.Sprintf("%d", num))
+	}
+
+	return sb.String()
 }
 
 func verifySignature(body []byte, signature string) bool {

@@ -39,17 +39,19 @@ func FetchUserInfo(ctx context.Context, token *oauth2.Token) (definitions.Google
 	return userInfo, nil
 }
 
-func CreateUserAndWallet(ctx context.Context, googleUser definitions.GoogleUserInfo) (*definitions.User, error) {
+func CreateUserAndWallet(ctx context.Context, googleUser definitions.GoogleUserInfo) (*definitions.User, *string, error) {
 	user := definitions.User{
 		ID:    googleUser.ID,
 		Email: googleUser.Email,
 		Name:  googleUser.Name,
 	}
 
+	var walletNumber string
+
 	// Start transaction
 	tx, err := definitions.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start transaction: %w\n", err)
+		return nil, nil, fmt.Errorf("failed to start transaction: %w\n", err)
 	}
 
 	defer func() {
@@ -67,7 +69,7 @@ func CreateUserAndWallet(ctx context.Context, googleUser definitions.GoogleUserI
 	log.Printf("Creating user with ID: %s", user.ID)
 	user, err = updateOrCreateUser(ctx, tx, user)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	log.Printf("Created user successfully : %s", user.ID)
 
@@ -75,25 +77,27 @@ func CreateUserAndWallet(ctx context.Context, googleUser definitions.GoogleUserI
 	log.Println("Checking if user wallet exists")
 	exists, err := wallet.CheckIfWalletExists(ctx, tx, user.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// If user wallet does not exist
 	if !exists {
 		// Create Users' Wallet
 		log.Println("Creating user wallet with ID")
-		if err := wallet.CreateWallet(tx, ctx, user.ID); err != nil {
-			return nil, err
+		walletNo, err := wallet.CreateWallet(tx, ctx, user.ID)
+		if err != nil {
+			return nil, nil, err
 		}
+		walletNumber = walletNo
 		log.Println("Created user wallet successfully")
 	}
 
 	// Commit transaction
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w\n", err)
+		return nil, nil, fmt.Errorf("failed to commit transaction: %w\n", err)
 	}
 
-	return &user, nil
+	return &user, &walletNumber, nil
 }
 
 func updateOrCreateUser(ctx context.Context, tx *sql.Tx, user definitions.User) (definitions.User, error) {

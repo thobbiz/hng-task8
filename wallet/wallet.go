@@ -211,6 +211,32 @@ func processChargeSuccess(payload definitions.PaystackWebhookPayload) {
 	fmt.Printf("SUCCESS: Wallet %s credited %.2f for transaction %s\n", walletID, float64(amount)/100, txID)
 }
 
+// Middleware for transfer operations
+func TransferAuthMiddleware() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		jwtErr := tryJWTAuth(ctx)
+		if jwtErr == nil {
+			ctx.Next()
+			return
+		}
+
+		valid, apiKeyErr := tryAPIKeyAuth(ctx, "perm_transfer")
+		if valid && apiKeyErr == nil {
+			ctx.Next()
+			return
+		}
+
+		finalError := "Authentication required or credentials invalid."
+		if jwtErr != nil && !strings.Contains(jwtErr.Error(), "header missing") {
+			finalError = fmt.Sprintf("JWT validation failed: %s", jwtErr.Error())
+		} else if apiKeyErr != nil {
+			finalError = fmt.Sprintf("API Key validation failed: %s", apiKeyErr.Error())
+		}
+
+		ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": finalError})
+	}
+}
+
 // Middleware for read operations
 func ReadAuthMiddleware() gin.HandlerFunc {
 	return func(ctx *gin.Context) {

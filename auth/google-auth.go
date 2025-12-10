@@ -86,7 +86,7 @@ func GoogleCallbackHandler(ctx *gin.Context) {
 	}
 
 	// Update or Create user in DB
-	user, err := CreateUserAndWallet(ctx, googleUser)
+	user, walletNumber, err := CreateUserAndWallet(ctx, googleUser)
 	if err != nil {
 		log.Printf("Failed to save user to db: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Internal DB error"})
@@ -102,8 +102,9 @@ func GoogleCallbackHandler(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"user":  user,
-		"token": tokenString,
+		"user":          user,
+		"wallet_number": walletNumber,
+		"token":         tokenString,
 	})
 }
 
